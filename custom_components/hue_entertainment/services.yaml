@@ -1,0 +1,252 @@
+start_effect:
+  name: Start effect
+  description: Start a lighting effect on a Hue entertainment group.
+  fields:
+    entity_id:
+      name: Group
+      description: Entertainment group light entity.
+      required: true
+      selector:
+        entity:
+          multiple: true
+          domain: light
+          integration: hue_entertainment
+    effect:
+      name: Effect
+      description: Which effect to run.
+      required: true
+      default: Strobe
+      selector:
+        select:
+          options:
+            - Strobe
+            - Flash
+            - Pulse
+            - Color Cycle
+            - Theater
+            - Candle
+            - Police
+            - Confetti
+    hz:
+      name: Strobe Hz
+      description: Flash rate for Strobe (default 25).
+      default: 25
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 0.5
+          unit_of_measurement: Hz
+          mode: slider
+    flash_count:
+      name: Flash count
+      description: Number of flashes for Flash effect.
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: box
+    pulse_rate:
+      name: Pulse rate
+      description: Brightness oscillations per second (Pulse / Theater).
+      default: 0.5
+      selector:
+        number:
+          min: 0.05
+          max: 5
+          step: 0.05
+          unit_of_measurement: Hz
+          mode: slider
+    cycle_speed:
+      name: Color speed
+      description: Colour-wheel rotations per second (Color Cycle / Theater).
+      default: 0.1
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 0.05
+          unit_of_measurement: rot/s
+          mode: slider
+    rgb_color:
+      name: Color
+      description: Base colour (used by Strobe, Flash, Pulse).
+      selector:
+        color_rgb:
+    brightness:
+      name: Brightness
+      description: 0–255.
+      default: 255
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1
+          mode: slider
+
+stop:
+  name: Stop streaming
+  description: Stop the active effect and return lights to normal.
+  fields:
+    entity_id:
+      name: Group
+      required: true
+      selector:
+        entity:
+          multiple: true
+          domain: light
+          integration: hue_entertainment
+
+play_sequence:
+  name: Play keyframe sequence
+  description: Play a keyframe sequence on an entertainment group. Use the Timeline Editor to build sequences.
+  fields:
+    entity_id:
+      name: Group
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: hue_entertainment
+    sequence:
+      name: Sequence data
+      description: Sequence JSON object with keyframes, duration, loop.
+      required: true
+      example: '{"duration": 4, "loop": true, "keyframes": [{"t": 0, "r": 255, "g": 0, "b": 0, "brightness": 1}, {"t": 2, "r": 0, "g": 0, "b": 255, "brightness": 0.5}, {"t": 4, "r": 255, "g": 0, "b": 0, "brightness": 1}]}'
+      selector:
+        object:
+
+update_sequence:
+  name: Update sequence (live)
+  description: Hot-swap sequence data on a running effect without restarting playback. Called by the Timeline Editor for real-time edits.
+  fields:
+    entity_id:
+      name: Group
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: hue_entertainment
+    sequence:
+      name: Sequence data
+      required: true
+      selector:
+        object:
+
+save_sequence:
+  name: Save sequence
+  description: Save a named lighting sequence. It will appear as an effect on all entertainment groups.
+  fields:
+    name:
+      name: Sequence name
+      required: true
+      selector:
+        text:
+    sequence:
+      name: Sequence data
+      required: true
+      selector:
+        object:
+
+delete_sequence:
+  name: Delete sequence
+  description: Remove a saved lighting sequence.
+  fields:
+    name:
+      name: Sequence name
+      required: true
+      selector:
+        text:
+
+create_area:
+  name: Create entertainment area
+  description: Create a new entertainment area on the Hue bridge.
+  fields:
+    bridge_entry_id:
+      name: Bridge
+      description: Which Hue bridge to create the area on.
+      required: true
+      selector:
+        config_entry:
+          integration: hue_entertainment
+    name:
+      name: Area name
+      required: true
+      selector:
+        text:
+    lights:
+      name: Lights
+      description: Hue lights to include in this area.
+      required: true
+      selector:
+        entity:
+          multiple: true
+          domain: light
+          integration: hue
+    area_class:
+      name: Class
+      description: Room type shown in the Hue app.
+      default: Free
+      selector:
+        select:
+          options:
+            - Free
+            - TV
+            - Game
+            - Music
+            - Concert
+            - BarTap
+            - Ambilight
+            - Other
+
+update_area:
+  name: Update entertainment area
+  description: Change the name or lights of an existing entertainment area.
+  fields:
+    bridge_entry_id:
+      name: Bridge
+      required: true
+      selector:
+        config_entry:
+          integration: hue_entertainment
+    area_entity:
+      name: Area
+      description: Pick the entertainment area to update.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: hue_entertainment
+    name:
+      name: New name
+      selector:
+        text:
+    lights:
+      name: Lights
+      description: Replace the light list with these Hue lights.
+      selector:
+        entity:
+          multiple: true
+          domain: light
+          integration: hue
+
+delete_area:
+  name: Delete entertainment area
+  description: Remove an entertainment area from the Hue bridge.
+  fields:
+    bridge_entry_id:
+      name: Bridge
+      required: true
+      selector:
+        config_entry:
+          integration: hue_entertainment
+    area_entity:
+      name: Area
+      description: Pick the entertainment area to delete.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: hue_entertainment

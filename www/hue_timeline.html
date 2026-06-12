@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hue Timeline Editor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #111827; color: #e5e7eb; font: 14px/1.5 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+
+#topbar { background: #1f2937; border-bottom: 1px solid #374151; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; flex-shrink: 0; }
+#topbar label { color: #9ca3af; font-size: 12px; }
+#topbar input[type=text], #topbar input[type=number], #topbar select {
+  background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 6px; padding: 4px 8px; font-size: 13px;
+}
+#topbar input[type=text] { width: 180px; }
+#topbar input[type=number] { width: 60px; }
+.btn { background: #374151; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.btn:hover { background: #4b5563; }
+.btn.primary { background: #2563eb; border-color: #2563eb; }
+.btn.primary:hover { background: #1d4ed8; }
+.btn.danger { background: #dc2626; border-color: #dc2626; }
+.btn.danger:hover { background: #b91c1c; }
+#status { color: #6b7280; font-size: 12px; margin-left: auto; }
+
+#main { display: flex; flex: 1; overflow: hidden; }
+
+#timeline-panel { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+canvas { display: block; width: 100%; }
+#ruler-canvas { height: 24px; cursor: default; }
+
+.light-track { border-bottom: 1px solid #1f2937; padding-bottom: 6px; margin-bottom: 2px; }
+.light-track:last-child { border-bottom: none; padding-bottom: 0; }
+.light-track-header { display: flex; align-items: center; gap: 4px; padding: 2px 0 3px 0; }
+.link-btn { background: none; border: none; cursor: pointer; padding: 1px 2px; border-radius: 3px; display: flex; align-items: center; flex-shrink: 0; color: #6b7280; }
+.link-btn:hover { background: #374151; color: #e5e7eb; }
+.link-btn.linked { color: #3b82f6; }
+.track-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #9ca3af; }
+
+#right-panel { width: 220px; flex-shrink: 0; background: #1f2937; border-left: 1px solid #374151; padding: 14px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+#right-panel h3 { font-size: 13px; font-weight: 600; color: #d1d5db; border-bottom: 1px solid #374151; padding-bottom: 8px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 11px; color: #9ca3af; }
+.field input[type=color] { width: 100%; height: 36px; border: none; border-radius: 6px; cursor: pointer; background: none; padding: 2px; }
+.field input[type=range] { width: 100%; accent-color: #3b82f6; }
+.field .value-hint { font-size: 11px; color: #6b7280; text-align: right; }
+#no-selection { color: #6b7280; font-size: 12px; }
+#saved-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+.saved-item { display: flex; gap: 4px; }
+.saved-item button { flex: 1; padding: 3px 6px; font-size: 11px; }
+.saved-item .del { flex: 0 0 auto; }
+
+#loop-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#loop-label input { accent-color: #3b82f6; width: 14px; height: 14px; }
+
+#kf-time-input::-webkit-inner-spin-button,
+#kf-time-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+#kf-time-input { -moz-appearance: textfield; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div>
+    <label>HA Token <span id="token-hint" style="color:#6b7280;font-size:10px"></span></label><br>
+    <input type="password" id="ha-token" placeholder="auto-detected from session" style="width:210px">
+  </div>
+  <div>
+    <label>Group</label><br>
+    <select id="group-select"><option value="">— connect first —</option></select>
+  </div>
+  <button class="btn" onclick="connect()">Connect</button>
+  <div style="width:1px;background:#374151;height:30px"></div>
+  <div>
+    <label>Sequence name</label><br>
+    <input type="text" id="seq-name" value="My Sequence">
+  </div>
+  <div>
+    <label>Duration (s)</label><br>
+    <input type="number" id="duration" value="8" min="0.5" step="0.5" onchange="onDurationChange()">
+  </div>
+  <label id="loop-label"><input type="checkbox" id="loop" checked> Loop</label>
+  <div style="width:1px;background:#374151;height:30px"></div>
+  <button class="btn primary" onclick="playSequence()">▶ Play</button>
+  <button class="btn" onclick="stopSequence()">■ Stop</button>
+  <div style="width:1px;background:#374151;height:30px"></div>
+  <button class="btn" onclick="saveSequence()">💾 Save</button>
+  <button class="btn" onclick="newSequence()">＋ New</button>
+  <span id="status">Not connected</span>
+</div>
+
+<div id="main">
+  <div id="timeline-panel">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="color:#6b7280;font-size:12px">Click a colour track to add a keyframe, or:</span>
+      <button class="btn" style="font-size:12px;padding:3px 10px" onclick="addKeyframeBtn()">＋ Add keyframe</button>
+      <button class="btn" style="font-size:12px;padding:3px 10px" onclick="toggleBatchPanel()">⋮ Batch</button>
+      <div id="batch-panel" style="display:none;align-items:center;gap:6px">
+        <span style="color:#9ca3af;font-size:12px">Add</span>
+        <input type="number" id="batch-count" value="4" min="1" max="64" style="width:50px;background:#374151;border:1px solid #4b5563;color:#e5e7eb;border-radius:6px;padding:3px 6px;font-size:12px">
+        <span style="color:#9ca3af;font-size:12px">evenly-spaced keyframes</span>
+        <button class="btn primary" style="font-size:12px;padding:3px 10px" onclick="addBatchKeyframes()">Add</button>
+      </div>
+    </div>
+
+    <!-- Ruler -->
+    <div><canvas id="ruler-canvas"></canvas></div>
+
+    <!-- Light tracks generated here -->
+    <div id="light-tracks"></div>
+
+    <p style="color:#4b5563;font-size:11px">Min frame duration: 1/25 s (40 ms). Keyframes interpolated at 25 fps.</p>
+  </div>
+
+  <div id="right-panel">
+    <div>
+      <h3>Keyframe</h3>
+      <div id="no-selection" style="color:#6b7280;font-size:12px">Click a keyframe to edit it.</div>
+      <div id="kf-editor" style="display:none">
+        <div class="field" style="margin-bottom:10px">
+          <label>Time (s)</label>
+          <div style="display:flex;gap:4px;align-items:center;margin-top:4px">
+            <button class="btn" style="padding:2px 9px;font-size:15px;line-height:1" onclick="adjustKfTime(-1)">−</button>
+            <input type="number" id="kf-time-input" min="0" step="0.04"
+              style="flex:1;background:#374151;border:1px solid #4b5563;color:#e5e7eb;border-radius:6px;padding:3px 6px;font-size:12px;text-align:center"
+              oninput="onKfTimeInput()">
+            <button class="btn" style="padding:2px 9px;font-size:15px;line-height:1" onclick="adjustKfTime(1)">+</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Color</label>
+          <input type="color" id="kf-color" oninput="onKfColorChange()">
+        </div>
+        <div class="field" style="margin-top:10px">
+          <label>Brightness</label>
+          <input type="range" id="kf-brightness" min="0" max="100" value="100" oninput="onKfBrightnessChange()">
+          <span class="value-hint" id="kf-brightness-val">100%</span>
+        </div>
+        <button class="btn danger" style="width:100%;margin-top:12px" onclick="deleteKeyframe()">Delete keyframe</button>
+      </div>
+    </div>
+    <div>
+      <h3>Saved sequences</h3>
+      <div id="saved-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
+let sequence = {
+  name: 'My Sequence', duration: 8, loop: true,
+  keyframes: [
+    { t: 0, r: 255, g: 50,  b: 0,   brightness: 1.0 },
+    { t: 4, r: 0,   g: 80,  b: 255, brightness: 0.7 },
+    { t: 8, r: 255, g: 50,  b: 0,   brightness: 1.0 },
+  ],
+};
+
+// lightTracks: [{name, id, linked, keyframes}]
+// linked=true → keyframes is ignored, uses sequence.keyframes
+let lightTracks = [{ name: 'All lights', id: 'all', linked: true, keyframes: null }];
+
+let selectedIdx      = null;
+let selectedLightIdx = 0;
+let draggingIdx      = null;
+let draggingLightIdx = null;
+let dragStartClientX = null;
+let dragStartT       = null;
+let brightDragIdx    = null;
+let brightDragLightIdx = null;
+let haToken          = '';
+let groupEntityId    = '';
+let connected        = false;
+let playState        = null;
+let _liveTimer       = null;
+let _savedListData   = [];
+
+function getTrackKfs(i) {
+  const t = lightTracks[i];
+  if (!t || t.linked || !t.keyframes) return sequence.keyframes;
+  return t.keyframes;
+}
+
+// ─────────────────────────────────────────────────────────────
+// HA API
+// ─────────────────────────────────────────────────────────────
+function apiHeaders() { return { 'Authorization': `Bearer ${haToken}`, 'Content-Type': 'application/json' }; }
+async function haGet(path) {
+  const r = await fetch(path, { headers: apiHeaders() });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+async function haPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: apiHeaders(), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+async function connect() {
+  const inp = document.getElementById('ha-token').value.trim();
+  if (inp) haToken = inp;
+  if (!haToken) { setStatus('Paste your HA token first'); return; }
+  localStorage.setItem('hue_timeline_token', haToken);
+  try {
+    const states = await haGet('/api/states');
+    const groups = states.filter(s => s.entity_id.startsWith('light.') && s.attributes.effect_list?.includes('Sequence'));
+    const sel = document.getElementById('group-select');
+    sel.innerHTML = groups.map(g =>
+      `<option value="${g.entity_id}">${g.attributes.friendly_name || g.entity_id}</option>`
+    ).join('');
+    if (groups.length) {
+      groupEntityId = groups[0].entity_id;
+      const st = states.find(s => s.entity_id === groupEntityId);
+      if (st) initLightTracks(st.attributes.lights || []);
+    }
+    connected = true;
+    setStatus(`Connected — ${groups.length} group(s) found`);
+    loadSavedList();
+  } catch(e) { setStatus('Error: ' + e.message); }
+}
+
+document.getElementById('group-select').addEventListener('change', async e => {
+  groupEntityId = e.target.value;
+  if (groupEntityId && haToken) {
+    try {
+      const st = await haGet(`/api/states/${groupEntityId}`);
+      initLightTracks(st.attributes.lights || []);
+      loadSavedList();
+    } catch(_) {}
+  }
+});
+
+function initLightTracks(lights) {
+  lightTracks = lights.length
+    ? lights.map(l => ({ name: l.name, id: l.id, linked: true, keyframes: null }))
+    : [{ name: 'All lights', id: 'all', linked: true, keyframes: null }];
+  selectedIdx = null; selectedLightIdx = 0;
+  renderLightTracks();
+  drawAll();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Light track rendering
+// ─────────────────────────────────────────────────────────────
+function linkSVG(linked) {
+  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity:${linked?1:0.28}">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>`;
+}
+
+function renderLightTracks() {
+  const container = document.getElementById('light-tracks');
+  container.innerHTML = '';
+  const showLink = lightTracks.length > 1;
+  lightTracks.forEach((track, i) => {
+    const div = document.createElement('div');
+    div.className = 'light-track';
+    div.innerHTML = `
+      <div class="light-track-header">
+        ${showLink ? `<button class="link-btn ${track.linked?'linked':''}" id="lbtn-${i}" title="${track.linked?'Unlink':'Link'}" onclick="toggleLink(${i})">${linkSVG(track.linked)}</button>` : ''}
+        <span class="track-name" title="${escapeHtml(track.name)}">${escapeHtml(track.name)}</span>
+      </div>
+      <canvas class="cc" data-ti="${i}" height="56" style="border-radius:4px;cursor:crosshair;margin-bottom:3px"></canvas>
+      <canvas class="bc" data-ti="${i}" height="44" style="border-radius:4px;cursor:ns-resize"></canvas>`;
+    container.appendChild(div);
+    const cc = div.querySelector('.cc');
+    const bc = div.querySelector('.bc');
+    cc.addEventListener('mousedown', e => onColorMouseDown(e, i));
+    cc.addEventListener('mousemove', e => onColorMouseMove(e, i));
+    cc.addEventListener('mouseup',    e => onColorMouseUp(e, i));
+    cc.addEventListener('mouseleave', e => onColorMouseUp(e, i));
+    bc.addEventListener('mousedown', e => onBrightMouseDown(e, i));
+    bc.addEventListener('mousemove', e => onBrightMouseMove(e, i));
+    bc.addEventListener('mouseup',    e => onBrightMouseUp(e, i));
+    bc.addEventListener('mouseleave', e => onBrightMouseUp(e, i));
+  });
+}
+
+function toggleLink(i) {
+  const t = lightTracks[i];
+  if (t.linked) {
+    t.linked = false;
+    t.keyframes = JSON.parse(JSON.stringify(sequence.keyframes));
+  } else {
+    t.linked = true;
+    t.keyframes = null;
+  }
+  const btn = document.getElementById(`lbtn-${i}`);
+  if (btn) { btn.className = `link-btn ${t.linked?'linked':''}`; btn.title = t.linked?'Unlink':'Link'; btn.innerHTML = linkSVG(t.linked); }
+  drawAll();
+}
+
+function buildSequencePayload() {
+  const allLinked = lightTracks.length <= 1 || lightTracks.every(lt => lt.linked);
+  if (allLinked) return { duration: sequence.duration, loop: sequence.loop, keyframes: sequence.keyframes };
+  const lights = {};
+  lightTracks.forEach((_, i) => { lights[String(i)] = { keyframes: getTrackKfs(i) }; });
+  return { duration: sequence.duration, loop: sequence.loop, lights };
+}
+
+function liveUpdate() {
+  if (!playState || !groupEntityId) return;
+  clearTimeout(_liveTimer);
+  _liveTimer = setTimeout(async () => {
+    if (!playState || !groupEntityId) return;
+    // update_sequence hot-swaps data without restarting the effect (no t=0 jump)
+    try { await haPost('/api/services/hue_entertainment/update_sequence', { entity_id: groupEntityId, sequence: buildSequencePayload() }); }
+    catch(_) {}
+  }, 80);
+}
+
+async function playSequence() {
+  if (!groupEntityId) { setStatus('Select a group first'); return; }
+  syncFromUI();
+  try {
+    await haPost('/api/services/hue_entertainment/play_sequence', { entity_id: groupEntityId, sequence: buildSequencePayload() });
+    playState = { startTime: performance.now(), duration: sequence.duration, loop: sequence.loop };
+    requestAnimationFrame(rafPlayhead);
+    setStatus('▶ Playing: ' + sequence.name);
+  } catch(e) { setStatus('Play error: ' + e.message); }
+}
+
+async function stopSequence() {
+  playState = null;
+  if (!groupEntityId) return;
+  try { await haPost('/api/services/hue_entertainment/stop', { entity_id: groupEntityId }); setStatus('■ Stopped'); drawAll(); }
+  catch(e) { setStatus('Stop error: ' + e.message); }
+}
+
+function getPlayheadT() {
+  if (!playState) return null;
+  const el = (performance.now() - playState.startTime) / 1000;
+  return playState.loop ? el % playState.duration : Math.min(el, playState.duration);
+}
+function rafPlayhead() { if (!playState) return; drawAll(); requestAnimationFrame(rafPlayhead); }
+
+// ─────────────────────────────────────────────────────────────
+// Sequence helpers
+// ─────────────────────────────────────────────────────────────
+function syncFromUI() {
+  sequence.name     = document.getElementById('seq-name').value;
+  sequence.duration = parseFloat(document.getElementById('duration').value) || 8;
+  sequence.loop     = document.getElementById('loop').checked;
+}
+
+function onDurationChange() {
+  syncFromUI();
+  sequence.keyframes.forEach(kf => { kf.t = Math.min(kf.t, sequence.duration); });
+  lightTracks.forEach(lt => { if (!lt.linked && lt.keyframes) lt.keyframes.forEach(kf => { kf.t = Math.min(kf.t, sequence.duration); }); });
+  sortAndRedraw();
+}
+
+function newSequence() {
+  sequence = { name: 'New Sequence', duration: 8, loop: true, keyframes: [
+    { t: 0, r: 255, g: 255, b: 255, brightness: 1 },
+    { t: 8, r: 255, g: 255, b: 255, brightness: 1 },
+  ]};
+  lightTracks.forEach(lt => { lt.linked = true; lt.keyframes = null; });
+  renderLightTracks();
+  _applySequenceToUI();
+}
+
+async function saveSequence() {
+  syncFromUI();
+  if (connected && groupEntityId) {
+    try {
+      await haPost('/api/services/hue_entertainment/save_sequence', { name: sequence.name, sequence: buildSequencePayload() });
+      setStatus('Saved to HA: ' + sequence.name);
+      await loadSavedList(); return;
+    } catch(e) { setStatus('Save error: ' + e.message); }
+  }
+  localStorage.setItem('hue_seq_' + sequence.name.replace(/\s+/g,'_'), JSON.stringify(sequence));
+  setStatus('Saved locally: ' + sequence.name);
+  loadSavedList();
+}
+
+async function loadSavedList() {
+  const div = document.getElementById('saved-list');
+  _savedListData = [];
+  if (connected && groupEntityId) {
+    try {
+      const st = await haGet(`/api/states/${groupEntityId}`);
+      const seqs = st.attributes.saved_sequences || {};
+      const names = Object.keys(seqs).sort();
+      if (!names.length) { div.innerHTML = '<span style="color:#6b7280;font-size:11px">No saved sequences</span>'; return; }
+      _savedListData = names.map(n => ({ type:'ha', name:n }));
+      _renderSavedList(div); return;
+    } catch(_) {}
+  }
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('hue_seq_')).sort();
+  if (!keys.length) { div.innerHTML = '<span style="color:#6b7280;font-size:11px">No saved sequences</span>'; return; }
+  _savedListData = keys.map(k => ({ type:'local', name: JSON.parse(localStorage.getItem(k)).name, key:k }));
+  _renderSavedList(div);
+}
+
+function _renderSavedList(div) {
+  div.innerHTML = _savedListData.map((item,i) =>
+    `<div class="saved-item">
+      <button class="btn" style="text-align:left;font-size:11px;overflow:hidden;text-overflow:ellipsis" onclick="loadSavedItem(${i})">${escapeHtml(item.name)}</button>
+      <button class="btn danger del" onclick="deleteSavedItem(${i})">✕</button>
+    </div>`
+  ).join('');
+}
+
+function _applyLoadedSequence(s, name) {
+  sequence = { name, duration: s.duration, loop: s.loop, keyframes: s.keyframes || [] };
+  if (s.lights) {
+    lightTracks.forEach((lt, i) => {
+      const track = s.lights[String(i)];
+      if (track) { lt.linked = false; lt.keyframes = JSON.parse(JSON.stringify(track.keyframes)); }
+      else        { lt.linked = true;  lt.keyframes = null; }
+    });
+    renderLightTracks();
+  } else {
+    lightTracks.forEach(lt => { lt.linked = true; lt.keyframes = null; });
+  }
+  _applySequenceToUI();
+}
+
+function loadSavedItem(i) {
+  const item = _savedListData[i]; if (!item) return;
+  if (item.type === 'ha') {
+    haGet(`/api/states/${groupEntityId}`).then(st => {
+      const s = (st.attributes.saved_sequences||{})[item.name];
+      if (s) _applyLoadedSequence(s, item.name);
+    });
+  } else {
+    const raw = localStorage.getItem(item.key); if (!raw) return;
+    _applyLoadedSequence(JSON.parse(raw), item.name);
+  }
+}
+
+async function deleteSavedItem(i) {
+  const item = _savedListData[i]; if (!item) return;
+  if (item.type === 'ha') {
+    try { await haPost('/api/services/hue_entertainment/delete_sequence', { name: item.name }); await loadSavedList(); }
+    catch(e) { setStatus('Delete error: ' + e.message); }
+  } else { localStorage.removeItem(item.key); loadSavedList(); }
+}
+
+function _applySequenceToUI() {
+  selectedIdx = null;
+  document.getElementById('seq-name').value = sequence.name;
+  document.getElementById('duration').value = sequence.duration;
+  document.getElementById('loop').checked   = sequence.loop;
+  updateKfEditor(); sortAndRedraw();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Canvas
+// ─────────────────────────────────────────────────────────────
+const SNAP_RATE = 25;
+function snapT(t) { return Math.round(t * SNAP_RATE) / SNAP_RATE; }
+function tToX(t, W) { return (t / sequence.duration) * W; }
+function xToT(x, W) { return Math.max(0, Math.min(sequence.duration, (x / W) * sequence.duration)); }
+function brightY(b, H) { return H - 4 - b * (H - 10); }
+function brightB(y, H) { return Math.max(0, Math.min(1, (H - 4 - y) / (H - 10))); }
+
+function sortAndRedraw() {
+  sequence.keyframes.sort((a,b) => a.t - b.t);
+  lightTracks.forEach(lt => { if (!lt.linked && lt.keyframes) lt.keyframes.sort((a,b) => a.t - b.t); });
+  drawAll();
+}
+
+function onKfEdited() { drawAll(); liveUpdate(); }
+
+function drawAll() {
+  // Resize ruler
+  const ruler = document.getElementById('ruler-canvas');
+  if (ruler) { const w = ruler.parentElement.clientWidth; if (ruler.width!==w) ruler.width=w; ruler.height=24; }
+  // Resize + draw tracks
+  lightTracks.forEach((_, i) => {
+    const cc = document.querySelector(`.cc[data-ti="${i}"]`);
+    const bc = document.querySelector(`.bc[data-ti="${i}"]`);
+    const w = cc ? cc.closest('.light-track').clientWidth : bc ? bc.closest('.light-track').clientWidth : 0;
+    if (cc) { if(cc.width!==w) cc.width=w; cc.height=56; drawColorTrack(cc, getTrackKfs(i), i); }
+    if (bc) { if(bc.width!==w) bc.width=w; bc.height=44; drawBrightTrack(bc, getTrackKfs(i), i); }
+  });
+  drawRuler();
+}
+
+function drawRuler() {
+  const c = document.getElementById('ruler-canvas'); if (!c) return;
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle='#1f2937'; ctx.fillRect(0,0,W,H);
+  ctx.font='10px system-ui'; ctx.textAlign='left';
+  const step = bestStep(sequence.duration, W);
+  for (let t=0; t<=sequence.duration+1e-9; t+=step) {
+    const x = tToX(t,W);
+    ctx.fillStyle='#4b5563'; ctx.fillRect(Math.round(x),H-4,1,4);
+    ctx.fillStyle='#9ca3af'; ctx.fillText(t%1===0?`${t}s`:`${t.toFixed(1)}s`, Math.round(x)+2, H-6);
+  }
+  const pt = getPlayheadT();
+  if (pt!==null) { const px=Math.round(tToX(pt,W)); ctx.fillStyle='#facc15'; ctx.fillRect(px-1,0,2,H); }
+}
+
+function bestStep(dur,W) {
+  for (const s of [0.04,0.08,0.2,0.5,1,2,5,10,30]) { if ((s/dur)*W >= 40) return s; }
+  return 30;
+}
+
+function drawColorTrack(c, kfs, ti) {
+  const ctx=c.getContext('2d'), W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H);
+  const MH=20, TY=MH, TH=H-MH;
+  ctx.fillStyle='#111827'; ctx.fillRect(0,0,W,H);
+  if (!kfs.length) return;
+
+  const solid=(x0,x1,kf)=>{ if(x1<=x0)return; ctx.fillStyle=`rgb(${kf.r},${kf.g},${kf.b})`; ctx.fillRect(x0,TY,x1-x0,TH); };
+  if (kfs.length===1) { solid(0,W,kfs[0]); }
+  else {
+    solid(0,tToX(kfs[0].t,W),kfs[0]);
+    for (let i=0;i<kfs.length-1;i++) {
+      const x0=tToX(kfs[i].t,W), x1=tToX(kfs[i+1].t,W);
+      const g=ctx.createLinearGradient(x0,0,x1,0);
+      g.addColorStop(0,`rgb(${kfs[i].r},${kfs[i].g},${kfs[i].b})`);
+      g.addColorStop(1,`rgb(${kfs[i+1].r},${kfs[i+1].g},${kfs[i+1].b})`);
+      ctx.fillStyle=g; ctx.fillRect(x0,TY,x1-x0,TH);
+    }
+    solid(tToX(kfs[kfs.length-1].t,W),W,kfs[kfs.length-1]);
+  }
+
+  const dim=(x0,x1,b0,b1)=>{ if(x1<=x0)return; const g=ctx.createLinearGradient(x0,0,x1,0); g.addColorStop(0,`rgba(0,0,0,${(1-b0).toFixed(3)})`); g.addColorStop(1,`rgba(0,0,0,${(1-b1).toFixed(3)})`); ctx.fillStyle=g; ctx.fillRect(x0,TY,x1-x0,TH); };
+  dim(0,tToX(kfs[0].t,W),kfs[0].brightness,kfs[0].brightness);
+  for (let i=0;i<kfs.length-1;i++) dim(tToX(kfs[i].t,W),tToX(kfs[i+1].t,W),kfs[i].brightness,kfs[i+1].brightness);
+  dim(tToX(kfs[kfs.length-1].t,W),W,kfs[kfs.length-1].brightness,kfs[kfs.length-1].brightness);
+
+  for (let i=0;i<kfs.length;i++) {
+    const x=Math.round(tToX(kfs[i].t,W));
+    const sel=i===selectedIdx && ti===selectedLightIdx;
+    ctx.strokeStyle=sel?'rgba(255,255,255,0.9)':'rgba(255,255,255,0.4)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(x,TY); ctx.lineTo(x,H); ctx.stroke(); ctx.setLineDash([]);
+    const dy=MH/2;
+    ctx.fillStyle=sel?'#fff':'#d1d5db'; ctx.strokeStyle=sel?'#3b82f6':'#6b7280'; ctx.lineWidth=sel?2:1;
+    ctx.beginPath(); ctx.moveTo(x,3); ctx.lineTo(x+8,dy); ctx.lineTo(x,MH-3); ctx.lineTo(x-8,dy); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+
+  const pt=getPlayheadT();
+  if (pt!==null) { const px=Math.round(tToX(pt,W)); ctx.strokeStyle='#facc15'; ctx.lineWidth=2; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(px,TY); ctx.lineTo(px,H); ctx.stroke(); }
+}
+
+function drawBrightTrack(c, kfs, ti) {
+  const ctx=c.getContext('2d'), W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle='#111827'; ctx.fillRect(0,0,W,H);
+  if (!kfs.length) return;
+
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(tToX(kfs[0].t,W),H); ctx.lineTo(tToX(kfs[0].t,W),brightY(kfs[0].brightness,H));
+  for (let i=1;i<kfs.length;i++) ctx.lineTo(tToX(kfs[i].t,W),brightY(kfs[i].brightness,H));
+  ctx.lineTo(W,brightY(kfs[kfs.length-1].brightness,H)); ctx.lineTo(W,H); ctx.closePath();
+  ctx.fillStyle='rgba(59,130,246,0.15)'; ctx.fill();
+
+  ctx.beginPath(); ctx.strokeStyle='#3b82f6'; ctx.lineWidth=2;
+  ctx.moveTo(0,brightY(kfs[0].brightness,H)); ctx.lineTo(tToX(kfs[0].t,W),brightY(kfs[0].brightness,H));
+  for (let i=1;i<kfs.length;i++) ctx.lineTo(tToX(kfs[i].t,W),brightY(kfs[i].brightness,H));
+  ctx.lineTo(W,brightY(kfs[kfs.length-1].brightness,H)); ctx.stroke();
+
+  for (let i=0;i<kfs.length;i++) {
+    const x=tToX(kfs[i].t,W), y=brightY(kfs[i].brightness,H);
+    const sel=i===selectedIdx && ti===selectedLightIdx;
+    ctx.beginPath(); ctx.arc(x,y,sel?7:5,0,Math.PI*2);
+    ctx.fillStyle=sel?'#fff':'#3b82f6'; ctx.strokeStyle=sel?'#3b82f6':'#1d4ed8'; ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+  }
+
+  const pt=getPlayheadT();
+  if (pt!==null) { const px=Math.round(tToX(pt,W)); ctx.strokeStyle='#facc15'; ctx.lineWidth=2; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke(); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Canvas interaction
+// ─────────────────────────────────────────────────────────────
+function cX(c,e) { const r=c.getBoundingClientRect(); return (e.clientX-r.left)*(c.width/r.width); }
+function cY(c,e) { const r=c.getBoundingClientRect(); return (e.clientY-r.top)*(c.height/r.height); }
+function hitKf(x,W,kfs) { for (let i=0;i<kfs.length;i++) if (Math.abs(x-tToX(kfs[i].t,W))<=10) return i; return -1; }
+
+function onColorMouseDown(e,ti) {
+  const c=e.target, x=cX(c,e), W=c.width, kfs=getTrackKfs(ti), hit=hitKf(x,W,kfs);
+  if (hit>=0) {
+    selectedIdx=hit; selectedLightIdx=ti; draggingIdx=hit; draggingLightIdx=ti;
+    dragStartClientX=e.clientX; dragStartT=kfs[hit].t;
+    updateKfEditor(); drawAll();
+  } else {
+    const t=snapT(xToT(x,W)); kfs.push({t,...interpolateColorAt(t,ti)});
+    sortAndRedraw();
+    selectedIdx=getTrackKfs(ti).findIndex(k=>Math.abs(k.t-t)<0.001); selectedLightIdx=ti;
+    updateKfEditor(); drawAll(); liveUpdate();
+  }
+}
+function onColorMouseMove(e,ti) {
+  if (draggingIdx===null||draggingLightIdx!==ti) return;
+  const c=e.target, dx=e.clientX-dragStartClientX, dt=(dx/c.width)*sequence.duration;
+  const newT=snapT(Math.max(0,Math.min(sequence.duration,dragStartT+dt)));
+  getTrackKfs(ti)[draggingIdx].t=newT;
+  if (selectedIdx===draggingIdx&&selectedLightIdx===ti) document.getElementById('kf-time-input').value=newT.toFixed(3);
+  onKfEdited();
+}
+function onColorMouseUp(e,ti) {
+  if (draggingIdx===null||draggingLightIdx!==ti) return;
+  const kfs=getTrackKfs(ti); kfs.sort((a,b)=>a.t-b.t);
+  if (selectedIdx!==null) {
+    const t=dragStartT+(e.clientX-dragStartClientX)/e.target.width*sequence.duration;
+    const sn=snapT(Math.max(0,Math.min(sequence.duration,t)));
+    selectedIdx=kfs.findIndex(k=>Math.abs(k.t-sn)<0.001); if(selectedIdx<0) selectedIdx=null;
+  }
+  draggingIdx=null; draggingLightIdx=null; updateKfEditor(); liveUpdate(); drawAll();
+}
+
+function onBrightMouseDown(e,ti) {
+  const c=e.target, x=cX(c,e), y=cY(c,e), W=c.width, H=c.height, kfs=getTrackKfs(ti);
+  for (let i=0;i<kfs.length;i++) {
+    const dx=x-tToX(kfs[i].t,W), dy=y-brightY(kfs[i].brightness,H);
+    if (Math.sqrt(dx*dx+dy*dy)<=12) {
+      brightDragIdx=i; brightDragLightIdx=ti; selectedIdx=i; selectedLightIdx=ti;
+      updateKfEditor(); _applyBrightDrag(y,H,ti); drawAll(); return;
+    }
+  }
+}
+function onBrightMouseMove(e,ti) {
+  if (brightDragIdx===null||brightDragLightIdx!==ti) return;
+  _applyBrightDrag(cY(e.target,e),e.target.height,ti); drawAll();
+}
+function onBrightMouseUp(e,ti) {
+  if (brightDragIdx!==null&&brightDragLightIdx===ti) { brightDragIdx=null; brightDragLightIdx=null; liveUpdate(); }
+}
+function _applyBrightDrag(y,H,ti) {
+  const b=brightB(y,H); getTrackKfs(ti)[brightDragIdx].brightness=b;
+  if (selectedIdx===brightDragIdx&&selectedLightIdx===ti) {
+    const pct=Math.round(b*100);
+    document.getElementById('kf-brightness').value=pct;
+    document.getElementById('kf-brightness-val').textContent=`${pct}%`;
+  }
+  liveUpdate();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Add / Batch
+// ─────────────────────────────────────────────────────────────
+function addKeyframeBtn() {
+  const ti=selectedLightIdx??0, kfs=getTrackKfs(ti);
+  let best=snapT(sequence.duration/2);
+  if (kfs.length>=2) {
+    let mx=0;
+    for (let i=0;i<kfs.length-1;i++) { const g=kfs[i+1].t-kfs[i].t; if(g>mx){mx=g;best=snapT((kfs[i].t+kfs[i+1].t)/2);} }
+    if (kfs[0].t>mx) { mx=kfs[0].t; best=snapT(kfs[0].t/2); }
+    const tail=sequence.duration-kfs[kfs.length-1].t; if(tail>mx) best=snapT(kfs[kfs.length-1].t+tail/2);
+  }
+  while (kfs.some(k=>Math.abs(k.t-best)<0.001)) best=snapT(best+1/25);
+  if (best>sequence.duration) best=snapT(sequence.duration);
+  kfs.push({t:best,...interpolateColorAt(best,ti)});
+  sortAndRedraw();
+  selectedIdx=getTrackKfs(ti).findIndex(k=>Math.abs(k.t-best)<0.001); selectedLightIdx=ti;
+  updateKfEditor();
+}
+
+function toggleBatchPanel() {
+  const p=document.getElementById('batch-panel'); p.style.display=p.style.display==='none'?'flex':'none';
+}
+
+function addBatchKeyframes() {
+  const n=Math.max(1,Math.min(64,parseInt(document.getElementById('batch-count').value)||4));
+  const ti=selectedLightIdx??0, kfs=getTrackKfs(ti);
+  for (let i=1;i<=n;i++) {
+    const t=snapT(i/(n+1)*sequence.duration);
+    if (!kfs.some(k=>Math.abs(k.t-t)<0.001)) kfs.push({t,...interpolateColorAt(t,ti)});
+  }
+  selectedIdx=null; updateKfEditor(); sortAndRedraw();
+  document.getElementById('batch-panel').style.display='none';
+}
+
+// ─────────────────────────────────────────────────────────────
+// Keyframe editor
+// ─────────────────────────────────────────────────────────────
+function updateKfEditor() {
+  const noSel=document.getElementById('no-selection'), ed=document.getElementById('kf-editor');
+  const kfs=getTrackKfs(selectedLightIdx??0);
+  if (selectedIdx===null||!kfs[selectedIdx]) { noSel.style.display=''; ed.style.display='none'; return; }
+  const kf=kfs[selectedIdx];
+  noSel.style.display='none'; ed.style.display='';
+  const inp=document.getElementById('kf-time-input'); inp.value=kf.t.toFixed(3); inp.max=sequence.duration;
+  document.getElementById('kf-color').value=rgbToHex(kf.r,kf.g,kf.b);
+  const pct=Math.round(kf.brightness*100);
+  document.getElementById('kf-brightness').value=pct;
+  document.getElementById('kf-brightness-val').textContent=`${pct}%`;
+}
+
+function onKfTimeInput() {
+  if (selectedIdx===null) return;
+  let t=parseFloat(document.getElementById('kf-time-input').value); if(isNaN(t)) return;
+  t=snapT(Math.max(0,Math.min(sequence.duration,t)));
+  const kfs=getTrackKfs(selectedLightIdx??0); kfs[selectedIdx].t=t;
+  document.getElementById('kf-time-input').value=t.toFixed(3);
+  sortAndRedraw(); selectedIdx=getTrackKfs(selectedLightIdx??0).findIndex(k=>Math.abs(k.t-t)<0.001); liveUpdate();
+}
+
+function adjustKfTime(dir) {
+  if (selectedIdx===null) return;
+  const kfs=getTrackKfs(selectedLightIdx??0);
+  const newT=snapT(Math.max(0,Math.min(sequence.duration,kfs[selectedIdx].t+dir/25)));
+  kfs[selectedIdx].t=newT; sortAndRedraw();
+  selectedIdx=getTrackKfs(selectedLightIdx??0).findIndex(k=>Math.abs(k.t-newT)<0.001);
+  updateKfEditor(); liveUpdate();
+}
+
+function onKfColorChange() {
+  if (selectedIdx===null) return;
+  const {r,g,b}=hexToRgb(document.getElementById('kf-color').value);
+  const kf=getTrackKfs(selectedLightIdx??0)[selectedIdx]; kf.r=r; kf.g=g; kf.b=b;
+  onKfEdited();
+}
+
+function onKfBrightnessChange() {
+  if (selectedIdx===null) return;
+  const v=parseInt(document.getElementById('kf-brightness').value);
+  getTrackKfs(selectedLightIdx??0)[selectedIdx].brightness=v/100;
+  document.getElementById('kf-brightness-val').textContent=`${v}%`;
+  onKfEdited();
+}
+
+function deleteKeyframe() {
+  if (selectedIdx===null) return;
+  getTrackKfs(selectedLightIdx??0).splice(selectedIdx,1);
+  selectedIdx=null; updateKfEditor(); sortAndRedraw(); liveUpdate();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────────────
+function interpolateColorAt(t, ti=null) {
+  const kfs = ti!==null ? getTrackKfs(ti) : sequence.keyframes;
+  const pick = kf => ({ r:kf.r, g:kf.g, b:kf.b, brightness:kf.brightness });
+  if (!kfs.length) return { r:255, g:255, b:255, brightness:1 };
+  if (t<=kfs[0].t) return pick(kfs[0]);
+  if (t>=kfs[kfs.length-1].t) return pick(kfs[kfs.length-1]);
+  for (let i=0;i<kfs.length-1;i++) {
+    if (kfs[i].t<=t && t<=kfs[i+1].t) {
+      const a=(t-kfs[i].t)/(kfs[i+1].t-kfs[i].t);
+      return { r:Math.round(kfs[i].r+(kfs[i+1].r-kfs[i].r)*a), g:Math.round(kfs[i].g+(kfs[i+1].g-kfs[i].g)*a), b:Math.round(kfs[i].b+(kfs[i+1].b-kfs[i].b)*a), brightness:kfs[i].brightness+(kfs[i+1].brightness-kfs[i].brightness)*a };
+    }
+  }
+  return pick(kfs[kfs.length-1]);
+}
+
+function rgbToHex(r,g,b) { return '#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join(''); }
+function hexToRgb(hex) { const n=parseInt(hex.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function setStatus(msg) { document.getElementById('status').textContent=msg; }
+
+// ─────────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  renderLightTracks();
+  let auto=false;
+  try {
+    const raw=localStorage.getItem('hassTokens');
+    if (raw) { const t=JSON.parse(raw); if(t.access_token&&t.expires&&Date.now()<t.expires) { haToken=t.access_token; document.getElementById('ha-token').value=haToken; document.getElementById('token-hint').textContent='(auto)'; connect(); auto=true; } }
+  } catch(_) {}
+  if (!auto) { const s=localStorage.getItem('hue_timeline_token'); if(s){ haToken=s; document.getElementById('ha-token').value=s; connect(); } }
+  loadSavedList();
+  setTimeout(drawAll, 50);
+});
+window.addEventListener('resize', drawAll);
+</script>
+</body>
+</html>

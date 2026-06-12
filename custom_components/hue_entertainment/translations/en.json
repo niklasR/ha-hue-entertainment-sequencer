@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hue Entertainment",
+        "description": "Enter the IP address of your Hue bridge. It will be auto-filled if discovered.",
+        "data": {
+          "bridge_ip": "Bridge IP address"
+        }
+      },
+      "link": {
+        "title": "Link with Hue bridge",
+        "description": "Press the button on your Hue bridge at **{bridge_ip}**, then click Submit.",
+        "data": {}
+      }
+    },
+    "error": {
+      "link_button_not_pressed": "Bridge button not pressed — try again.",
+      "link_failed": "Failed to connect to the bridge. Check the IP address."
+    },
+    "abort": {
+      "already_configured": "This bridge is already configured."
+    }
+  },
+  "services": {
+    "start_effect": {
+      "name": "Start effect",
+      "description": "Start a lighting effect on a Hue entertainment group.",
+      "fields": {
+        "entity_id": {"name": "Entity", "description": "Entertainment group light entity."},
+        "effect": {"name": "Effect", "description": "Strobe, Flash, Pulse, Color Cycle, Candle, Police, or Confetti."},
+        "hz": {"name": "Hz", "description": "Strobe rate (default 25)."},
+        "flash_count": {"name": "Flash count", "description": "Number of flashes for the Flash effect (default 3)."},
+        "pulse_rate": {"name": "Pulse rate", "description": "Breathe cycles per second (default 0.5)."},
+        "cycle_speed": {"name": "Cycle speed", "description": "Colour rotation speed for Color Cycle (default 0.1)."},
+        "rgb_color": {"name": "Color", "description": "RGB colour [r, g, b] 0-255."},
+        "brightness": {"name": "Brightness", "description": "0-255 (default 255)."}
+      }
+    },
+    "stop": {
+      "name": "Stop streaming",
+      "description": "Stop the active effect and return lights to normal.",
+      "fields": {
+        "entity_id": {"name": "Entity", "description": "Entertainment group light entity."}
+      }
+    }
+  }
+}
