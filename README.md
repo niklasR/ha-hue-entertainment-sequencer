@@ -266,6 +266,13 @@ Open the editor in the same browser as your HA frontend (so the auto-auth token 
 
 ---
 
+## Known Limitations
+
+**Entertainment API brightness cap (~50% of maximum)**  
+The Hue Entertainment API (Signify firmware) intentionally caps lights at approximately 50% of their maximum brightness during streaming mode. This is a deliberate firmware constraint — Signify reserves headroom to allow fast frame transitions without saturating the driver electronics. It is not a bug in this integration. If you need full brightness, use the standard Hue integration instead (which uses the normal clip/v2 API and has no such cap).
+
+---
+
 ## License
 
 MIT
