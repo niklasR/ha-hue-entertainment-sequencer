@@ -59,14 +59,35 @@ _OPENSSL_FALLBACK_PATHS = [
 # Frame builder
 # ---------------------------------------------------------------------------
 
-def _build_frame(lights: list[tuple[int, int, int, int]], seq: int = 0) -> bytes:
+def _rgb16_to_xy16(r16: int, g16: int, b16: int) -> tuple[int, int, int]:
+    """Convert 16-bit RGB to Hue CIE xy + brightness (all 0-65535).
+
+    Uses the Signify wide-gamut matrix. Returns (x16, y16, bri16).
+    """
+    r = (r16 / 65535) ** 2.2
+    g = (g16 / 65535) ** 2.2
+    b = (b16 / 65535) ** 2.2
+    X = r * 0.664511 + g * 0.154324 + b * 0.162028
+    Y = r * 0.283881 + g * 0.668433 + b * 0.047685
+    Z = r * 0.000088 + g * 0.072310 + b * 0.986039
+    total = X + Y + Z
+    if total == 0:
+        return 0, 0, 0
+    x = X / total
+    y = Y / total
+    return int(x * 65535), int(y * 65535), int(Y * 65535)
+
+
+def _build_frame(lights: list[tuple[int, int, int, int]], seq: int = 0, xy: bool = False) -> bytes:
+    colorspace = 0x01 if xy else 0x00
     header = (
         b"HueStream"
-        + bytes([0x01, 0x00, seq & 0xFF, 0x00, 0x00, 0x00, 0x00])
+        + bytes([0x01, 0x00, seq & 0xFF, 0x00, 0x00, colorspace, 0x00])
     )
     payload = bytearray()
     for light_id, r, g, b in lights:
-        payload += bytes([0x00]) + struct.pack(">H", light_id) + struct.pack(">HHH", r, g, b)
+        v1, v2, v3 = _rgb16_to_xy16(r, g, b) if xy else (r, g, b)
+        payload += bytes([0x00]) + struct.pack(">H", light_id) + struct.pack(">HHH", v1, v2, v3)
     return header + bytes(payload)
 
 
@@ -271,6 +292,7 @@ class EntertainmentGroupStream:
         self._effect_task: asyncio.Task | None = None
         self._current_effect: str | None = None
         self._seq = 0
+        self._xy_colorspace = False
 
         # Live parameters — effects read these every frame so changes take effect immediately
         self._params: dict = {
@@ -424,7 +446,7 @@ class EntertainmentGroupStream:
     # ------------------------------------------------------------------
 
     def _enqueue_frame(self, lights: list[tuple[int, int, int, int]]) -> None:
-        frame = _build_frame(lights, seq=self._seq)
+        frame = _build_frame(lights, seq=self._seq, xy=self._xy_colorspace)
         self._seq = (self._seq + 1) & 0xFF
         # Drop oldest if full to keep latency low
         if self._frame_queue.full():

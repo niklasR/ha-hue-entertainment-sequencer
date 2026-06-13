@@ -415,10 +415,12 @@ function _applyLoadedSequence(s, name) {
       else        { lt.linked = true;  lt.keyframes = null; }
     });
     renderLightTracks();
+    // Defer drawing until after the browser has computed layout for the new canvases
+    requestAnimationFrame(() => _applySequenceToUI());
   } else {
     lightTracks.forEach(lt => { lt.linked = true; lt.keyframes = null; });
+    _applySequenceToUI();
   }
-  _applySequenceToUI();
 }
 
 function loadSavedItem(i) {
@@ -504,6 +506,7 @@ function bestStep(dur,W) {
 }
 
 function drawColorTrack(c, kfs, ti) {
+  if (!kfs) return;
   const ctx=c.getContext('2d'), W=c.width, H=c.height;
   ctx.clearRect(0,0,W,H);
   const MH=20, TY=MH, TH=H-MH;
@@ -544,6 +547,7 @@ function drawColorTrack(c, kfs, ti) {
 }
 
 function drawBrightTrack(c, kfs, ti) {
+  if (!kfs) return;
   const ctx=c.getContext('2d'), W=c.width, H=c.height;
   ctx.clearRect(0,0,W,H); ctx.fillStyle='#111827'; ctx.fillRect(0,0,W,H);
   if (!kfs.length) return;
